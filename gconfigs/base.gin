@@ -1,0 +1,10 @@
+# Base configuration for Pi3 inference
+# Set the path to the pi3 module here
+# Can be overridden in environment-specific config files
+
+pi3_path = "/d_disk/Pi3"
+
+# Output configuration
+# Default output folder name format: {input_stem}_{datetime}
+# If output_dir is empty, it will be auto-generated
+output_dir = ""

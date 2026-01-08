@@ -328,6 +328,13 @@ def write_ply(
     rgb=None,
     path='output.ply',
 ) -> None:
+    """Write point cloud to PLY file.
+    
+    Args:
+        xyz: Point positions
+        rgb: Point colors
+        path: Output file path
+    """
     if torch.is_tensor(xyz):
         xyz = xyz.detach().cpu().numpy()
 
@@ -389,3 +396,240 @@ def write_ply(
     vertex_element = PlyElement.describe(elements, "vertex")
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
+
+def write_camera_trajectory(
+    camera_poses,
+    path='camera_trajectory.npz',
+) -> None:
+    """
+    Save camera trajectory (camera-to-world transformation matrices).
+    
+    Args:
+        camera_poses: Camera-to-world matrices, shape (B, N, 4, 4) or (N, 4, 4)
+        path: Path to save the .npz file
+    """
+    if torch.is_tensor(camera_poses):
+        camera_poses = camera_poses.detach().cpu().numpy()
+    
+    # Handle batch dimension
+    if len(camera_poses.shape) == 4:
+        if camera_poses.shape[0] == 1:
+            camera_poses = camera_poses[0]
+    
+    # Save as numpy array
+    np.savez(path, camera_poses=camera_poses)
+    print(f"Camera trajectory saved to: {path}")
+
+
+def write_camera_trajectory_txt(
+    camera_poses,
+    path='camera_trajectory.txt',
+) -> None:
+    """
+    Save camera trajectory as a text file (one camera position per line).
+    
+    Args:
+        camera_poses: Camera-to-world matrices, shape (B, N, 4, 4) or (N, 4, 4)
+        path: Path to save the .txt file
+    """
+    if torch.is_tensor(camera_poses):
+        camera_poses = camera_poses.detach().cpu().numpy()
+    
+    # Handle batch dimension
+    if len(camera_poses.shape) == 4:
+        if camera_poses.shape[0] == 1:
+            camera_poses = camera_poses[0]
+    
+    # Extract camera centers
+    camera_centers = camera_poses[:, :3, 3]
+    
+    with open(path, 'w') as f:
+        f.write("# Camera trajectory (camera centers)\n")
+        f.write("# x y z\n")
+        for i, center in enumerate(camera_centers):
+            f.write(f"{center[0]:.6f} {center[1]:.6f} {center[2]:.6f}\n")
+    
+    print(f"Camera trajectory (txt) saved to: {path}")
+
+
+def write_camera_trajectory_json(
+    camera_poses,
+    path='camera_trajectory.json',
+) -> None:
+    """
+    Save camera trajectory as a JSON file.
+    
+    Args:
+        camera_poses: Camera-to-world matrices, shape (B, N, 4, 4) or (N, 4, 4)
+        path: Path to save the .json file
+    """
+    import json
+    
+    if torch.is_tensor(camera_poses):
+        camera_poses = camera_poses.detach().cpu().numpy()
+    
+    # Handle batch dimension
+    if len(camera_poses.shape) == 4:
+        if camera_poses.shape[0] == 1:
+            camera_poses = camera_poses[0]
+    
+    # Extract camera centers
+    camera_centers = camera_poses[:, :3, 3]
+    
+    data = {
+        "num_cameras": len(camera_centers),
+        "camera_centers": camera_centers.tolist(),
+        "camera_poses": camera_poses.tolist(),
+    }
+    
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=2)
+    
+    print(f"Camera trajectory (json) saved to: {path}")
+
+
+def write_camera_frustums_ply(
+    camera_poses,
+    pointcloud_xyz=None,
+    path='trajectory.ply',
+    frustum_scale=0.1,
+) -> None:
+    """
+    Save camera trajectory with frustum visualization as PLY file.
+    
+    Creates a square pyramid (五面体) for each camera showing its position and orientation.
+    The apex points at the camera origin, and the square base face towards the camera's viewing direction.
+    
+    Args:
+        camera_poses: Camera-to-world matrices, shape (B, N, 4, 4) or (N, 4, 4)
+        pointcloud_xyz: Optional point cloud to include in the PLY
+        path: Path to save the .ply file
+        frustum_scale: Scale of the camera frustum pyramids
+    """
+    if torch.is_tensor(camera_poses):
+        camera_poses = camera_poses.detach().cpu().numpy()
+    
+    # Handle batch dimension
+    if len(camera_poses.shape) == 4:
+        if camera_poses.shape[0] == 1:
+            camera_poses = camera_poses[0]
+    
+    num_cameras = len(camera_poses)
+    
+    # Start with point cloud if provided
+    if pointcloud_xyz is not None:
+        if torch.is_tensor(pointcloud_xyz):
+            pointcloud_xyz = pointcloud_xyz.detach().cpu().numpy()
+        all_vertices = [pointcloud_xyz]
+        vertex_offset = len(pointcloud_xyz)
+    else:
+        all_vertices = []
+        vertex_offset = 0
+    
+    # Create square pyramid (五面体) vertices in camera frame
+    # Apex at origin, base square at distance along +Z axis (camera viewing direction)
+    frustum_vertices_template = np.array([
+        [0, 0, 0],  # Apex at camera center
+        # Base vertices (square) at viewing direction
+        [frustum_scale, frustum_scale, frustum_scale],   # Right-Top
+        [-frustum_scale, frustum_scale, frustum_scale],  # Left-Top
+        [-frustum_scale, -frustum_scale, frustum_scale], # Left-Bottom
+        [frustum_scale, -frustum_scale, frustum_scale],  # Right-Bottom
+    ], dtype=np.float32)
+    
+    # Colors for pyramids (blue to red gradient based on camera index)
+    frustum_faces = []
+    all_colors = []
+    
+    for i, pose in enumerate(camera_poses):
+        # Transform frustum vertices to world coordinates
+        rotation = pose[:3, :3]
+        translation = pose[:3, 3]
+        
+        # Apply camera-to-world transformation
+        world_vertices = frustum_vertices_template @ rotation.T + translation
+        
+        # Add to vertices list
+        all_vertices.append(world_vertices)
+        
+        # Create color for this frustum (gradient from blue to red)
+        t = i / max(1, num_cameras - 1)
+        color = np.array([
+            int(t * 255),           # Red
+            100,                     # Green (fixed)
+            int((1 - t) * 255),     # Blue
+        ], dtype=np.uint8)
+        
+        # Add color for each vertex of this pyramid
+        all_colors.extend([color] * 5)
+        
+        # Define pyramid faces:
+        # Face 0: Square base (1, 2, 3, 4) - pointing towards viewing direction
+        # Faces 1-4: Triangular side faces connecting apex to base edges
+        base_idx = vertex_offset + i * 5
+        
+        # Square base face
+        frustum_faces.append([base_idx + 1, base_idx + 2, base_idx + 3])
+        frustum_faces.append([base_idx + 1, base_idx + 3, base_idx + 4])
+        
+        # Triangular side faces (connecting apex to base edges)
+        frustum_faces.append([base_idx + 0, base_idx + 1, base_idx + 2])  # Top side
+        frustum_faces.append([base_idx + 0, base_idx + 2, base_idx + 3])  # Left side
+        frustum_faces.append([base_idx + 0, base_idx + 3, base_idx + 4])  # Bottom side
+        frustum_faces.append([base_idx + 0, base_idx + 4, base_idx + 1])  # Right side
+    
+    # Combine all vertices
+    vertices = np.vstack(all_vertices)
+    
+    # Handle colors for point cloud (if included)
+    if pointcloud_xyz is not None:
+        # Reuse point cloud colors (default grayscale)
+        pointcloud_colors = np.zeros((len(pointcloud_xyz), 3), dtype=np.uint8)
+        # Color by height or use default
+        min_z = pointcloud_xyz[:, 2].min()
+        max_z = pointcloud_xyz[:, 2].max()
+        if max_z > min_z:
+            normalized_z = (pointcloud_xyz[:, 2] - min_z) / (max_z - min_z)
+            pointcloud_colors[:, 0] = (normalized_z * 255).astype(np.uint8)  # Red channel
+            pointcloud_colors[:, 2] = ((1 - normalized_z) * 255).astype(np.uint8)  # Blue channel
+        else:
+            pointcloud_colors[:, 0:3] = 128
+        
+        all_colors = np.vstack([pointcloud_colors, np.array(all_colors)])
+    else:
+        all_colors = np.array(all_colors)
+    
+    # Create PLY elements
+    dtype = [
+        ("x", "f4"),
+        ("y", "f4"),
+        ("z", "f4"),
+        ("red", "u1"),
+        ("green", "u1"),
+        ("blue", "u1"),
+    ]
+    
+    vertex_data = np.empty(len(vertices), dtype=dtype)
+    vertex_data["x"] = vertices[:, 0]
+    vertex_data["y"] = vertices[:, 1]
+    vertex_data["z"] = vertices[:, 2]
+    vertex_data["red"] = all_colors[:, 0]
+    vertex_data["green"] = all_colors[:, 1]
+    vertex_data["blue"] = all_colors[:, 2]
+    
+    vertex_element = PlyElement.describe(vertex_data, "vertex")
+    
+    # Create face element
+    if frustum_faces:
+        face_dtype = [("vertex_indices", "i4", (3,))]
+        face_data = np.array(
+            [(faces,) for faces in frustum_faces],
+            dtype=face_dtype
+        )
+        face_element = PlyElement.describe(face_data, "face")
+        ply_data = PlyData([vertex_element, face_element])
+    else:
+        ply_data = PlyData([vertex_element])
+    
+    ply_data.write(path)
+    print(f"Camera frustums (trajectory.ply) saved to: {path}")
