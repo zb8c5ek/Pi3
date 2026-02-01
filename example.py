@@ -1,3 +1,8 @@
+import os
+# Set hub directories before importing torch/huggingface
+os.environ['TORCH_HOME'] = r'D:\HUBs\torch_hub'
+os.environ['HF_HOME'] = r'D:\HUBs\huggingface_hub'
+
 import torch
 import argparse
 from pi3.utils.basic import load_images_as_tensor, write_ply

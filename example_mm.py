@@ -1,7 +1,11 @@
+import os
+# Set hub directories before importing torch/huggingface
+os.environ['TORCH_HOME'] = r'D:\HUBs\torch_hub'
+os.environ['HF_HOME'] = r'D:\HUBs\huggingface_hub'
+
 import torch
 import argparse
 import numpy as np
-import os
 from pi3.utils.basic import load_multimodal_data, write_ply
 from pi3.utils.geometry import depth_edge
 from pi3.models.pi3x import Pi3X

@@ -99,12 +99,17 @@ class FlashAttention(Attention):
         # q, k, v = unbind(qkv, 2)
         q, k, v = [qkv[:,:,i] for i in range(3)]
 
-        if q.dtype == torch.bfloat16:
-            with nn.attention.sdpa_kernel(SDPBackend.FLASH_ATTENTION):
-                x = scaled_dot_product_attention(q, k, v)
-        else:
-            with nn.attention.sdpa_kernel([SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION]):
-                x = scaled_dot_product_attention(q, k, v)
+        # Try flash attention first, fall back to other backends if unavailable
+        try:
+            if q.dtype == torch.bfloat16:
+                with nn.attention.sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                    x = scaled_dot_product_attention(q, k, v)
+            else:
+                with nn.attention.sdpa_kernel([SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION]):
+                    x = scaled_dot_product_attention(q, k, v)
+        except RuntimeError:
+            # Fallback when flash attention is not available
+            x = scaled_dot_product_attention(q, k, v)
 
         x = x.transpose(1, 2).reshape([B, N, C])
 
@@ -334,12 +339,17 @@ class FlashAttentionRope(AttentionRope):
             q = self.rope(q, xpos)
             k = self.rope(k, xpos)
 
-        if q.dtype == torch.bfloat16:
-            with nn.attention.sdpa_kernel(SDPBackend.FLASH_ATTENTION):
-                x = scaled_dot_product_attention(q, k, v)
-        else:
-            with nn.attention.sdpa_kernel([SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION]):
-                x = scaled_dot_product_attention(q, k, v)
+        # Try flash attention first, fall back to other backends if unavailable
+        try:
+            if q.dtype == torch.bfloat16:
+                with nn.attention.sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                    x = scaled_dot_product_attention(q, k, v)
+            else:
+                with nn.attention.sdpa_kernel([SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION]):
+                    x = scaled_dot_product_attention(q, k, v)
+        except RuntimeError:
+            # Fallback when flash attention is not available
+            x = scaled_dot_product_attention(q, k, v)
 
         x = x.transpose(1, 2).reshape([B, N, C])
 
@@ -393,12 +403,17 @@ class PRopeFlashAttention(AttentionRope):
         k = apply_fn_kv(k)
         v = apply_fn_kv(v)
 
-        if q.dtype == torch.bfloat16 and attn_mask is None:
-            with nn.attention.sdpa_kernel(SDPBackend.FLASH_ATTENTION):
-                x = scaled_dot_product_attention(q, k, v)
-        else:
-            with nn.attention.sdpa_kernel([SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION]):
-                x = scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+        # Try flash attention first, fall back to other backends if unavailable
+        try:
+            if q.dtype == torch.bfloat16 and attn_mask is None:
+                with nn.attention.sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                    x = scaled_dot_product_attention(q, k, v)
+            else:
+                with nn.attention.sdpa_kernel([SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION]):
+                    x = scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+        except RuntimeError:
+            # Fallback when flash attention is not available
+            x = scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
         
         x = apply_fn_o(x)
 
@@ -433,16 +448,23 @@ class FlashCrossAttentionRope(CrossAttentionRope):
         
         dropout_p = self.attn_drop.p if self.training else 0.0
         
-        if q.dtype == torch.bfloat16:
-            with nn.attention.sdpa_kernel(SDPBackend.FLASH_ATTENTION):
-                x = scaled_dot_product_attention(
-                    q, k, v, attn_mask=attn_bias, dropout_p=dropout_p
-                )
-        else:
-            with nn.attention.sdpa_kernel([SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION]):
-                x = scaled_dot_product_attention(
-                    q, k, v, attn_mask=attn_bias, dropout_p=dropout_p
-                )
+        # Try flash attention first, fall back to other backends if unavailable
+        try:
+            if q.dtype == torch.bfloat16:
+                with nn.attention.sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                    x = scaled_dot_product_attention(
+                        q, k, v, attn_mask=attn_bias, dropout_p=dropout_p
+                    )
+            else:
+                with nn.attention.sdpa_kernel([SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION]):
+                    x = scaled_dot_product_attention(
+                        q, k, v, attn_mask=attn_bias, dropout_p=dropout_p
+                    )
+        except RuntimeError:
+            # Fallback when flash attention is not available
+            x = scaled_dot_product_attention(
+                q, k, v, attn_mask=attn_bias, dropout_p=dropout_p
+            )
 
         x = x.transpose(1, 2).reshape(B, N, C)
 
